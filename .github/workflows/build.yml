@@ -1,0 +1,108 @@
+name: Build
+on: workflow_dispatch
+
+jobs:
+  make_plugin:
+    name: ${{matrix.name}}
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        os: [windows-2019, ubuntu-18.04]
+        include:
+          - os: windows-2019
+            name: windows
+          - os: ubuntu-18.04
+            name: linux
+    steps:
+      - name: Enable Git long paths
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@v2
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Build
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            cl.exe //LD //Fe:plugin.dll plugin.c
+          else
+            gcc plugin.c -shared -o plugin.so
+          fi
+      - name: Prepare to upload artifact
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE
+          mkdir artifact
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            cp plugin.dll artifact/
+          else
+            cp plugin.so artifact/
+          fi
+          cp license.txt artifact/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2.2.2
+        with:
+          name: ${{matrix.name}}
+          path: artifact
+  release:
+    needs: make_plugin
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v2
+      - name: Create 7z and zip files
+        run: |
+          cd windows
+          7z a windows.7z plugin.dll license.txt
+          7z a windows.zip plugin.dll license.txt
+
+          cd ../linux
+          7z a linux.7z plugin.so license.txt
+          7z a linux.zip plugin.so license.txt
+      - id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        with:
+          tag_name: release
+          release_name: Release
+          body: Release
+          draft: false
+          prerelease: false
+      - name: Upload Windows 7z
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        with:
+          upload_url: ${{steps.create_release.outputs.upload_url}}
+          asset_path: ./windows/windows.7z
+          asset_name: windows.7z
+          asset_content_type: application/x-7z-compressed
+      - name: Upload Windows zip
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        with:
+          upload_url: ${{steps.create_release.outputs.upload_url}}
+          asset_path: ./windows/windows.zip
+          asset_name: windows.zip
+          asset_content_type: application/zip
+      - name: Upload Linux 7z
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        with:
+          upload_url: ${{steps.create_release.outputs.upload_url}}
+          asset_path: ./linux/linux.7z
+          asset_name: linux.7z
+          asset_content_type: application/x-7z-compressed
+      - name: Upload Linux zip
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        with:
+          upload_url: ${{steps.create_release.outputs.upload_url}}
+          asset_path: ./linux/linux.zip
+          asset_name: linux.zip
+          asset_content_type: application/zip
